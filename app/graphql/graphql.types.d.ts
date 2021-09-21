@@ -1,0 +1,3 @@
+type MutationError = {
+  message: string
+}

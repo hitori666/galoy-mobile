@@ -11,7 +11,6 @@ import { Screen } from "../../components/screen"
 import { translate } from "../../i18n"
 import type { MoveMoneyStackParamList } from "../../navigation/stack-param-lists"
 import {
-  getPubKey,
   QUERY_TRANSACTIONS,
   queryWallet,
   balanceBtc,
@@ -25,51 +24,64 @@ import { StackNavigationProp } from "@react-navigation/stack"
 import { PaymentConfirmationInformation } from "./payment-confirmation-information"
 import useFee from "./use-fee"
 
-export const LIGHTNING_PAY = gql`
-  mutation payInvoice($invoice: String!, $amount: Int, $memo: String) {
-    invoice {
-      payInvoice(invoice: $invoice, amount: $amount, memo: $memo)
-    }
-  }
-`
-
-// export const PAY_KEYSEND_USERNAME = gql`
-//   mutation payKeysendUsername(
-//     $amount: Int!
-//     $destination: String!
-//     $username: String!
-//     $memo: String
-//   ) {
+// export const LIGHTNING_PAY = gql`
+//   mutation payInvoice($invoice: String!, $amount: Int, $memo: String) {
 //     invoice {
-//       payKeysendUsername(
-//         amount: $amount
-//         destination: $destination
-//         username: $username
-//         memo: $memo
-//       )
+//       payInvoice(invoice: $invoice, amount: $amount, memo: $memo)
 //     }
 //   }
 // `
 
-export INTRA_LEDGER_PAYMENT_SEND = gql`
-  mutation intraLedgerPaymentSend(
-    $recipient: String!
-    $amount: Int!
-    $memo: String
-  ) {
-
-  }
-`
-
-const ONCHAIN_PAY = gql`
-  mutation onchain_pay($address: String!, $amount: Int!, $memo: String) {
-    onchain {
-      pay(address: $address, amount: $amount, memo: $memo) {
-        success
+export const LN_PAY = gql`
+  mutation lnInvoicePaymentSend(input: LnInvoicePaymentInput!) {
+    lnInvoicePaymentSend(input: $input) {
+      errors {
+        message
       }
     }
   }
 `
+
+const LN_NO_AMOUNT_PAY = gql`
+  mutation lnNoAmountInvoicePaymentSend($input: LnNoAmountInvoicePaymentInput!) {
+    lnNoAmountInvoicePaymentSend(input: $input) {
+      errors {
+        message
+      }
+    }
+  }
+`
+
+export const INTRA_LEDGER_PAY = gql`
+  mutation intraLedgerPaymentSend($input: IntraLedgerPaymentSendInput!) {
+    intraLedgerPaymentSend(input: $input) {
+      errors {
+        message
+      }
+      status
+    }
+  }
+`
+
+const ONCHAIN_PAY = gql`
+  mutation onChainPaymentSend(input: OnChainPaymentSendInput!) {
+    onChainPaymentSend(input: $input) {
+      errors {
+        message
+      }
+    }
+  }
+`
+
+// const ONCHAIN_PAY = gql`
+//   mutation onchain_pay($address: String!, $amount: Int!, $memo: String) {
+//     onchain {
+//       pay(address: $address, amount: $amount, memo: $memo) {
+//         success
+//       }
+//     }
+//   }
+// `
 
 type SendBitcoinConfirmationScreenProps = {
   navigation: StackNavigationProp<MoveMoneyStackParamList, "sendBitcoinConfirmation">
@@ -140,11 +152,13 @@ export const SendBitcoinConfirmationScreen = ({
     fetchPolicy: "network-only",
   })
 
-  const [lightningPay] = useMutation(LIGHTNING_PAY, {
+  const [lnPay] = useMutation(LN_PAY, {
     update: () => queryTransactions(),
   })
 
-  const [payKeysendUsername] = useMutation(PAY_KEYSEND_USERNAME, {
+  const [lnNoAmountPay] = useMutation(LN_NO_AMOUNT_PAY)
+
+  const [intraLedgerPay] = useMutation(INTRA_LEDGER_PAY, {
     update: () => queryTransactions(),
   })
 
@@ -154,18 +168,132 @@ export const SendBitcoinConfirmationScreen = ({
     update: () => queryTransactions(),
   })
 
-  const pay
+  const handlePaymentReturn = (status, errors) => {
+    if (status === "SUCCESS") {
+      queryWallet(client, "network-only")
+      setStatus(Status.SUCCESS)
+    } else if (status === "PENDING") {
+      setStatus(Status.PENDING)
+    } else {
+      setStatus(Status.ERROR)
+      setErrs(errors)
+    }
+  }
 
-  const pay = async () => {
-    if ((amountless || paymentType === "onchain") && paymentSatAmount === 0) {
+  const handlePaymentError = (error) => {
+    console.log({ error }, "error loop")
+    setStatus(Status.ERROR)
+    setErrs([{ message: `an error occured. try again later\n${error}` }])
+  }
+
+  const payUsername = async () => {
+    if (!UsernameValidation.isValid(username)) {
+      setStatus(Status.ERROR)
+      setErrs([{ message: translate("SendBitcoinScreen.invalidUsername") }])
+      return
+    }
+
+    setErrs([])
+    setStatus(Status.LOADING)
+    try {
+      const { data, errors } = await intraLedgerPay({ 
+        variables: {
+          input: {
+            recipient: username,
+            amount: paymentSatAmount,
+            memo
+          }
+        }
+      })
+
+      const status = data.intraLedgerPaymentSend.status
+      const errs = errors ? errors.map((error) => { return { message: error.message } }) : data.intraLedgerPaymentSend.errors
+      handlePaymentReturn(status, errs)
+    } catch (err) {
+      handlePaymentError(err)
+    }
+  }
+
+  const payLightning = async () => {
+    setErrs([])
+    setStatus(Status.LOADING)
+    try {
+      const { data, errors } = await lnPay({ 
+        variables: {
+          input: {
+            paymentRequest: invoice,
+            memo
+          }
+        }
+      })
+
+      const status = data.lnInvoicePaymentSend.status
+      const errs = errors ? errors.map((error) => { return { message: error.message } }) : data.lnInvoicePaymentSend.errors
+      handlePaymentReturn(status, errs)
+    } catch (err) {
+      handlePaymentError(err)
+    }
+  }
+
+  const payAmountlessLightning = async () => {
+    if (paymentSatAmount === 0) {
       setStatus(Status.ERROR)
       setErrs([{ message: translate("SendBitcoinScreen.noAmount") }])
       return
     }
 
-    if (paymentType === "username" && !UsernameValidation.isValid(username)) {
+    setErrs([])
+    setStatus(Status.LOADING)
+    try {
+      const { data, errors } = await lnNoAmountPay({ 
+        variables: {
+          input: {
+            paymentRequest: invoice,
+            amount: paymentSatAmount,
+            memo
+          }
+        }
+      })
+
+      const status = data.lnNoAmountInvoicePaymentSend.status
+      const errs = errors ? errors.map((error) => { return { message: error.message } }) : data.lnNoAmountInvoicePaymentSend.errors
+      handlePaymentReturn(status, errs)
+    } catch (err) {
+      handlePaymentError(err)
+    }
+  }
+
+  const payOnchain = () => {
+    if (paymentSatAmount === 0) {
       setStatus(Status.ERROR)
-      setErrs([{ message: translate("SendBitcoinScreen.invalidUsername") }])
+      setErrs([{ message: translate("SendBitcoinScreen.noAmount") }])
+      return
+    }
+  }
+
+  const pay = async () => {
+    if (paymentType === "username") {
+      payUsername()
+      return
+    }
+
+    if (paymentType === "lightning") {
+      if (amountless) {
+        payAmountlessLightning()
+      } else {
+        payLightning()
+      }
+      return
+    }
+
+    if (paymentType === "onchain") {
+      payOnchain()
+      return
+    }
+
+    if ((amountless || paymentType === "onchain") && paymentSatAmount === 0) {
+      setStatus(Status.ERROR)
+      setErrs([{ message: translate("SendBitcoinScreen.noAmount") }])
       return
     }
 
@@ -187,16 +315,6 @@ export const SendBitcoinConfirmationScreen = ({
       } else if (paymentType === "onchain") {
         mutation = onchainPay
         variables = { address, amount: paymentSatAmount, memo }
-      } else if (paymentType === "username") {
-        mutation = payKeysendUsername
-
-        // FIXME destination is confusing
-        variables = {
-          amount: paymentSatAmount,
-          destination: getPubKey(client),
-          username,
-          memo,
-        }
       }
 
       try {
@@ -217,8 +335,6 @@ export const SendBitcoinConfirmationScreen = ({
         pending = data?.invoice?.payInvoice === "pending" ?? false
       } else if (paymentType === "onchain") {
         success = data?.onchain?.pay?.success
-      } else if (paymentType === "username") {
-        success = data?.invoice?.payKeysendUsername === Status.SUCCESS ?? false
       }
 
       if (success) {
