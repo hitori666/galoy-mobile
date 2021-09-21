@@ -1,1 +1,7 @@
-export const graphqlV2OperationNames: string[] = ["intraLedgerPaymentSend", "lnInvoicePaymentSend", "lnNoAmountInvoicePaymentSend", "userLogin", "userRequestAuthCode"]
+export const graphqlV2OperationNames: string[] = [
+  "intraLedgerPaymentSend",
+  "lnInvoicePaymentSend",
+  "lnNoAmountInvoicePaymentSend",
+  "userLogin",
+  "userRequestAuthCode",
+]
