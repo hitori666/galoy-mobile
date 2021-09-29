@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 
 	
-	<receiver android:exported="false" android:name="io.invertase.firebase.messaging.ReactNativeFirebaseMessagi ngReceiver" android:permission="com.google.android.c2dm.permission.SEND">
+	<receiver android:exported="false" android:name="io.invertase.firebase.messaging.ReactNativeFirebaseMessagingReceiver" android:permission="com.google.android.c2dm.permission.SEND">
 		<intent-filter>
 			<action android:name="com.google.android.c2dm.intent.RECEIVE"/>
 		</intent-filter>
